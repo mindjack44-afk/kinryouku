@@ -157,6 +157,7 @@ const bases = {
 const map = L.map('map',{zoomControl:false}).setView([43.5,142.8],7); // 北海道中央
 bases.gsi.addTo(map); let curBase=bases.gsi;
 L.control.zoom({position:'bottomleft'}).addTo(map);
+map.attributionControl.addAttribution('禁止区域データ: 北海道森林管理局（非公式・参考用）');
 
 const layerGroups = { ban:L.layerGroup().addTo(map), law:L.layerGroup().addTo(map), gate:L.layerGroup().addTo(map) };
 let banPolys=[]; // 点内判定用 [{rings:[[ [lng,lat],... ]]}]
