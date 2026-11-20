@@ -136,6 +136,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shpjs@4.0.4/dist/shp.min.js"></script>
 <script>
 // ===== 設定 =====
 const PORTAL = 'https://hokkaido.maps.arcgis.com';
@@ -144,7 +145,7 @@ const SOURCES = [
   { key:'law',  id:'8b5f03e62de6426c9b8db8fb116ce30a', name:'法令等禁止区域',   cls:'poly-law',  color:'#e67e00' },
   { key:'gate', id:'57f7d6fd141b40d2915cd19a21361dd4', name:'ゲート・通行止め', cls:null,        color:'#1769ff' },
 ];
-const CACHE_KEY='kinryoku_cache_v2', TRACKS_KEY='kinryoku_tracks_v1', POINTS_KEY='kinryoku_points_v1';
+const CACHE_KEY='kinryoku_cache_v3', TRACKS_KEY='kinryoku_tracks_v1', POINTS_KEY='kinryoku_points_v1';
 
 // ===== 地図 =====
 const bases = {
@@ -169,29 +170,13 @@ function esriToGeo(f){
   return null;
 }
 
-// ===== データ取得 =====
-async function j(url){ const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error(r.status); return r.json(); }
-
-async function resolveService(id){
-  const it = await j(`${PORTAL}/sharing/rest/content/items/${id}?f=json`);
-  return { url: it.url, type: it.type };
-}
-async function fetchLayers(svcUrl){
-  const meta = await j(`${svcUrl}?f=json`);
-  const layers = (meta.layers||[]).concat(meta.tables? []:[]);
-  const subs = layers.length? layers : [{id:0}];
-  const out=[];
-  for(const s of subs){
-    const base=`${svcUrl}/${s.id}/query?where=1%3D1&outFields=*&outSR=4326`;
-    let fc=null;
-    try{ fc=await j(base+'&f=geojson'); if(!fc.features) fc=null; }catch(e){}
-    if(!fc){ // Esri JSONで取り直し
-      const ej=await j(base+'&f=json');
-      fc={type:'FeatureCollection',features:(ej.features||[]).map(esriToGeo).filter(Boolean)};
-    }
-    out.push(fc);
-  }
-  return out;
+// ===== データ取得（公開シェープファイルを直接ダウンロードして変換） =====
+async function fetchShapes(id){
+  const url=`${PORTAL}/sharing/rest/content/items/${id}/data`;
+  const buf=await fetch(url,{cache:'no-store'}).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); });
+  const geo=await shp(buf);               // zip内のshp/dbf/prjを解析しGeoJSON化（必要なら緯度経度へ変換）
+  const arr=Array.isArray(geo)?geo:[geo];
+  return arr.map(fc=> (fc&&fc.features)? fc : {type:'FeatureCollection',features:[]});
 }
 
 function styleFeature(src){
@@ -234,9 +219,7 @@ async function loadAll(forceNet){
   try{
     const data={}; banPolys=[];
     for(const s of SOURCES){
-      const svc=await resolveService(s.id);
-      if(!svc.url) throw new Error(s.name+': サービスURL取得失敗');
-      const cols=await fetchLayers(svc.url);
+      const cols=await fetchShapes(s.id);
       data[s.key]=cols; render(s,cols);
     }
     localStorage.setItem(CACHE_KEY, JSON.stringify({time:Date.now(),data}));
