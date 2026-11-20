@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>禁猟区マップ（北海道）</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{ --bg:#111; --fg:#fff; --accent:#1769ff; --danger:#e53935; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-serif}
+  #map{position:absolute;inset:0}
+  /* 網掛けポリゴン（CSSでfillをパターンに固定。Leafletの再描画でも消えない） */
+  .poly-ban{ fill:url(#hatchRed)!important; fill-opacity:.85!important; stroke:#d00!important; stroke-width:1.5!important; }
+  .poly-law{ fill:url(#hatchOrange)!important; fill-opacity:.85!important; stroke:#e67e00!important; stroke-width:1.5!important; }
+  .leaflet-container{background:#aadaff}
+
+  .bar{position:absolute;top:0;left:0;right:0;z-index:1000;display:flex;gap:6px;
+    padding:8px;background:linear-gradient(#000c,#0000);pointer-events:none}
+  .bar .title{color:#fff;font-weight:700;font-size:15px;text-shadow:0 1px 3px #000;
+    align-self:center;margin-right:auto;pointer-events:none}
+  .bar button{pointer-events:auto}
+  button{border:0;border-radius:10px;padding:9px 12px;font-size:14px;font-weight:600;
+    background:#fff;color:#111;box-shadow:0 2px 6px #0005}
+  button.on{background:var(--danger);color:#fff}
+  button.ac{background:var(--accent);color:#fff}
+
+  .fab{position:absolute;right:10px;z-index:1000;display:flex;flex-direction:column;gap:10px}
+  .fab{bottom:18px}
+  .fab button{width:auto;min-width:56px;height:48px;border-radius:24px;font-size:13px}
+
+  .status{position:absolute;left:10px;bottom:18px;z-index:1000;max-width:60%}
+  .pill{display:inline-block;background:#000a;color:#fff;font-size:12px;
+    padding:6px 10px;border-radius:14px;margin:3px 0;backdrop-filter:blur(2px)}
+  .warn{position:absolute;top:52px;left:10px;right:10px;z-index:1200;
+    background:var(--danger);color:#fff;text-align:center;font-weight:700;
+    padding:10px;border-radius:12px;box-shadow:0 3px 10px #0007;display:none}
+
+  .sheet{position:absolute;inset:auto 0 0 0;z-index:1500;background:#fff;
+    border-radius:16px 16px 0 0;box-shadow:0 -4px 20px #0006;transform:translateY(100%);
+    transition:transform .25s;max-height:80%;display:flex;flex-direction:column}
+  .sheet.open{transform:translateY(0)}
+  .sheet h3{margin:0;padding:14px 16px;border-bottom:1px solid #eee;display:flex;align-items:center}
+  .sheet h3 .x{margin-left:auto;background:#eee;border-radius:50%;width:30px;height:30px;padding:0}
+  .sheet .body{overflow:auto;padding:12px 16px}
+  .row{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px}
+  .row .t{color:#666;font-size:11px}
+  .row .del{margin-left:auto;background:#fde;color:#c00;padding:5px 9px;border-radius:8px}
+  .grp{font-weight:700;margin:10px 0 4px;font-size:13px;color:#444}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}
+  .note{font-size:12px;color:#666;line-height:1.5}
+  .modal{position:absolute;inset:0;z-index:2000;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:#fff;border-radius:14px;max-width:360px;padding:20px}
+  .card h2{margin:0 0 10px;font-size:17px}
+  .card p{font-size:13px;line-height:1.6;color:#333;margin:8px 0}
+  .layers{position:absolute;top:50px;right:10px;z-index:1600;background:#fff;border-radius:12px;
+    box-shadow:0 3px 12px #0005;padding:10px 14px;display:none}
+  .layers label{display:block;font-size:13px;padding:5px 0}
+  .leaflet-control-attribution{font-size:9px}
+</style>
+</head>
+<body>
+<!-- 網掛けパターン定義（非表示） -->
+<svg width="0" height="0" style="position:absolute">
+ <defs>
+  <pattern id="hatchRed" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+    <rect width="8" height="8" fill="#ff5252" fill-opacity=".18"/>
+    <line x1="0" y1="0" x2="0" y2="8" stroke="#d00" stroke-width="2.3"/>
+  </pattern>
+  <pattern id="hatchOrange" width="8" height="8" patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+    <rect width="8" height="8" fill="#ffb74d" fill-opacity=".15"/>
+    <line x1="0" y1="0" x2="0" y2="8" stroke="#e67e00" stroke-width="2.3"/>
+  </pattern>
+ </defs>
+</svg>
+
+<div id="map"></div>
+
+<div class="bar">
+  <span class="title">禁猟区マップ（北海道）</span>
+  <button id="btnLayers">レイヤ</button>
+  <button id="btnRefresh" class="ac">更新</button>
+</div>
+
+<div class="layers" id="layersPanel">
+  <label><input type="checkbox" id="ly-ban" checked> 銃猟立入禁止区域</label>
+  <label><input type="checkbox" id="ly-law" checked> 法令等禁止区域</label>
+  <label><input type="checkbox" id="ly-gate" checked> ゲート・通行止め</label>
+  <hr style="border:0;border-top:1px solid #eee;margin:6px 0">
+  <label><input type="radio" name="base" value="gsi" checked> 地理院（淡色）</label>
+  <label><input type="radio" name="base" value="gsipale"> 地理院（標準）</label>
+  <label><input type="radio" name="base" value="photo"> 航空写真</label>
+  <label><input type="radio" name="base" value="osm"> OpenStreetMap</label>
+</div>
+
+<div class="warn" id="warn">⚠ 禁止区域内にいます</div>
+
+<div class="status" id="status"></div>
+
+<div class="fab">
+  <button id="btnLoc" class="ac">現在地</button>
+  <button id="btnTrack">軌跡記録</button>
+  <button id="btnPoint">地点記録</button>
+  <button id="btnLog">ログ</button>
+</div>
+
+<!-- ログシート -->
+<div class="sheet" id="sheet">
+  <h3>記録ログ <button class="x" onclick="closeSheet()">✕</button></h3>
+  <div class="body">
+    <div class="btns">
+      <button class="ac" onclick="exportPointsCSV()">地点CSV</button>
+      <button class="ac" onclick="exportTracksGPX()">軌跡GPX</button>
+      <button class="ac" onclick="exportTracksCSV()">軌跡CSV</button>
+    </div>
+    <div class="grp">地点記録</div>
+    <div id="pointList"><div class="note">まだありません</div></div>
+    <div class="grp">軌跡記録</div>
+    <div id="trackList"><div class="note">まだありません</div></div>
+    <div class="note" style="margin-top:14px">
+      データはこのスマホの中だけに保存されます（localStorage）。アプリを消すと消えます。大事な記録はCSV/GPXで書き出してください。
+    </div>
+  </div>
+</div>
+
+<!-- 初回の注意 -->
+<div class="modal" id="modal">
+  <div class="card">
+    <h2>はじめに（重要）</h2>
+    <p>この地図の禁止区域は、北海道森林管理局が公開しているデータを<b>そのまま読み込んで</b>表示しています（国有林・道有林の区域）。</p>
+    <p>データは更新されることがあります。<b>入林の前に必ず「更新」ボタンで最新を読み込み</b>、現地の看板・標識も確認してください。</p>
+    <p>鳥獣保護区など、ここに出ない禁止区域もあります。狩猟は狩猟者登録時の鳥獣保護区等位置図と法令に従ってください。</p>
+    <p class="note">※参考用です。この表示を理由にした違反の責任は負えません。</p>
+    <button class="ac" style="width:100%;margin-top:8px" onclick="document.getElementById('modal').style.display='none'">わかった</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ===== 設定 =====
+const PORTAL = 'https://hokkaido.maps.arcgis.com';
+const SOURCES = [
+  { key:'ban',  id:'cc9bacd4871640e1813173a371b58081', name:'銃猟立入禁止区域', cls:'poly-ban',  color:'#d00' },
+  { key:'law',  id:'8b5f03e62de6426c9b8db8fb116ce30a', name:'法令等禁止区域',   cls:'poly-law',  color:'#e67e00' },
+  { key:'gate', id:'57f7d6fd141b40d2915cd19a21361dd4', name:'ゲート・通行止め', cls:null,        color:'#1769ff' },
+];
+const CACHE_KEY='kinryoku_cache_v2', TRACKS_KEY='kinryoku_tracks_v1', POINTS_KEY='kinryoku_points_v1';
+
+// ===== 地図 =====
+const bases = {
+  gsi:    L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',{maxZoom:18,attribution:'地理院タイル'}),
+  gsipale:L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',{maxZoom:18,attribution:'地理院タイル'}),
+  photo:  L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',{maxZoom:18,attribution:'地理院タイル（写真）'}),
+  osm:    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}),
+};
+const map = L.map('map',{zoomControl:false}).setView([43.5,142.8],7); // 北海道中央
+bases.gsi.addTo(map); let curBase=bases.gsi;
+L.control.zoom({position:'bottomleft'}).addTo(map);
+
+const layerGroups = { ban:L.layerGroup().addTo(map), law:L.layerGroup().addTo(map), gate:L.layerGroup().addTo(map) };
+let banPolys=[]; // 点内判定用 [{rings:[[ [lng,lat],... ]]}]
+
+// ===== Esri JSON → GeoJSON（f=geojson非対応サーバーの保険） =====
+function esriToGeo(f){
+  const g=f.geometry; if(!g) return null;
+  if(g.rings) return {type:'Feature',properties:f.attributes||{},geometry:{type:'Polygon',coordinates:g.rings}};
+  if(g.paths) return {type:'Feature',properties:f.attributes||{},geometry:{type:g.paths.length>1?'MultiLineString':'LineString',coordinates:g.paths.length>1?g.paths:g.paths[0]}};
+  if(g.x!=null) return {type:'Feature',properties:f.attributes||{},geometry:{type:'Point',coordinates:[g.x,g.y]}};
+  return null;
+}
+
+// ===== データ取得 =====
+async function j(url){ const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error(r.status); return r.json(); }
+
+async function resolveService(id){
+  const it = await j(`${PORTAL}/sharing/rest/content/items/${id}?f=json`);
+  return { url: it.url, type: it.type };
+}
+async function fetchLayers(svcUrl){
+  const meta = await j(`${svcUrl}?f=json`);
+  const layers = (meta.layers||[]).concat(meta.tables? []:[]);
+  const subs = layers.length? layers : [{id:0}];
+  const out=[];
+  for(const s of subs){
+    const base=`${svcUrl}/${s.id}/query?where=1%3D1&outFields=*&outSR=4326`;
+    let fc=null;
+    try{ fc=await j(base+'&f=geojson'); if(!fc.features) fc=null; }catch(e){}
+    if(!fc){ // Esri JSONで取り直し
+      const ej=await j(base+'&f=json');
+      fc={type:'FeatureCollection',features:(ej.features||[]).map(esriToGeo).filter(Boolean)};
+    }
+    out.push(fc);
+  }
+  return out;
+}
+
+function styleFeature(src){
+  return {
+    style:(f)=>{
+      const gt=f.geometry.type;
+      if(gt.includes('Polygon')) return {className:src.cls, weight:1.5};
+      return {color:src.color, weight:3};
+    },
+    pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:5,color:src.color,fillColor:src.color,fillOpacity:.9,weight:1}),
+    onEachFeature:(f,l)=>{
+      const p=f.properties||{}; const nm=p.名称||p.NAME||p.Name||p.name||p.区域名||'';
+      if(nm) l.bindPopup(`<b>${src.name}</b><br>${nm}`); else l.bindPopup(src.name);
+    }
+  };
+}
+
+function render(src, collections){
+  const grp=layerGroups[src.key]; grp.clearLayers();
+  collections.forEach(fc=>{
+    const gj=L.geoJSON(fc, styleFeature(src)).addTo(grp);
+    if(src.key==='ban'||src.key==='law'){
+      fc.features.forEach(ft=>{ const g=ft.geometry; if(!g)return;
+        if(g.type==='Polygon') banPolys.push(g.coordinates);
+        else if(g.type==='MultiPolygon') g.coordinates.forEach(c=>banPolys.push(c));
+      });
+    }
+  });
+}
+
+async function loadAll(forceNet){
+  setStatus('データ読み込み中…');
+  // キャッシュ先出し
+  const cached = JSON.parse(localStorage.getItem(CACHE_KEY)||'null');
+  if(cached && !forceNet){
+    banPolys=[]; SOURCES.forEach(s=>{ if(cached.data[s.key]) render(s,cached.data[s.key]); });
+    setStatus('前回データを表示（'+fmt(cached.time)+'）。オンラインなら更新を推奨');
+  }
+  // ネット取得
+  try{
+    const data={}; banPolys=[];
+    for(const s of SOURCES){
+      const svc=await resolveService(s.id);
+      if(!svc.url) throw new Error(s.name+': サービスURL取得失敗');
+      const cols=await fetchLayers(svc.url);
+      data[s.key]=cols; render(s,cols);
+    }
+    localStorage.setItem(CACHE_KEY, JSON.stringify({time:Date.now(),data}));
+    setStatus('最新データを表示（'+fmt(Date.now())+'）');
+    fitToData();
+  }catch(e){
+    if(!cached) setStatus('⚠ データ取得に失敗: '+e.message+'（通信・公開設定を確認）');
+    else setStatus('更新失敗。前回データのまま（'+fmt(cached.time)+'）');
+  }
+}
+function fitToData(){
+  let b=null;
+  Object.values(layerGroups).forEach(g=>g.eachLayer(l=>{ if(l.getBounds){ b=b?b.extend(l.getBounds()):l.getBounds(); }}));
+  if(b&&b.isValid()) map.fitBounds(b,{padding:[20,20]});
+}
+
+// ===== 現在地・区域内判定 =====
+let locMarker=null, accCircle=null, watchId=null, lastPos=null;
+function startWatch(){
+  if(!navigator.geolocation){ alert('GPS非対応'); return; }
+  if(watchId!=null) return;
+  watchId=navigator.geolocation.watchPosition(onPos,err=>setStatus('GPSエラー: '+err.message),
+    {enableHighAccuracy:true,maximumAge:2000,timeout:15000});
+}
+function onPos(p){
+  const {latitude:la,longitude:ln,accuracy:ac}=p.coords; lastPos=[la,ln];
+  if(!locMarker){ locMarker=L.circleMarker([la,ln],{radius:7,color:'#fff',weight:2,fillColor:'#1769ff',fillOpacity:1}).addTo(map);
+    accCircle=L.circle([la,ln],{radius:ac,color:'#1769ff',weight:1,fillOpacity:.08}).addTo(map); map.setView([la,ln],14);
+  } else { locMarker.setLatLng([la,ln]); accCircle.setLatLng([la,ln]).setRadius(ac); }
+  const inside=pointInBan(ln,la);
+  document.getElementById('warn').style.display=inside?'block':'none';
+  if(recording) pushTrackPt(la,ln);
+}
+function pointInBan(x,y){ // x=lng y=lat
+  for(const poly of banPolys){ if(ringsContain(poly,x,y)) return true; } return false;
+}
+function ringsContain(rings,x,y){
+  if(!rings.length) return false;
+  if(!inRing(rings[0],x,y)) return false;       // 外周
+  for(let i=1;i<rings.length;i++) if(inRing(rings[i],x,y)) return false; // 穴
+  return true;
+}
+function inRing(r,x,y){
+  let c=false;
+  for(let i=0,j=r.length-1;i<r.length;j=i++){
+    const xi=r[i][0],yi=r[i][1],xj=r[j][0],yj=r[j][1];
+    if(((yi>y)!=(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) c=!c;
+  } return c;
+}
+
+// ===== ログ：軌跡 =====
+let recording=false, curTrack=null;
+let tracks=JSON.parse(localStorage.getItem(TRACKS_KEY)||'[]');
+let points=JSON.parse(localStorage.getItem(POINTS_KEY)||'[]');
+let trackLine=null;
+function toggleTrack(){
+  const b=document.getElementById('btnTrack');
+  if(!recording){
+    recording=true; b.textContent='記録停止'; b.classList.add('on'); startWatch();
+    curTrack={id:Date.now(),name:'軌跡 '+fmt(Date.now()),start:Date.now(),pts:[]};
+    trackLine=L.polyline([],{color:'#1769ff',weight:4,opacity:.8}).addTo(map);
+    setStatus('軌跡を記録中…');
+  } else {
+    recording=false; b.textContent='軌跡記録'; b.classList.remove('on');
+    if(curTrack&&curTrack.pts.length){ curTrack.end=Date.now(); tracks.push(curTrack); save(); renderLogs(); }
+    curTrack=null; trackLine=null; setStatus('軌跡を保存しました');
+  }
+}
+function pushTrackPt(la,ln){
+  const t=Date.now(); const last=curTrack.pts[curTrack.pts.length-1];
+  if(last){ const d=dist(last[0],last[1],la,ln); if(d<3) return; } // 3m未満は無視
+  curTrack.pts.push([la,ln,t]); if(trackLine) trackLine.addLatLng([la,ln]);
+}
+function dist(la1,ln1,la2,ln2){ const R=6371000,p=Math.PI/180;
+  const a=0.5-Math.cos((la2-la1)*p)/2+Math.cos(la1*p)*Math.cos(la2*p)*(1-Math.cos((ln2-ln1)*p))/2;
+  return 2*R*Math.asin(Math.sqrt(a)); }
+
+// ===== ログ：地点 =====
+function addPoint(){
+  if(!lastPos){ startWatch(); alert('現在地を取得中です。数秒後にもう一度押してください'); return; }
+  const memo=prompt('メモ（捕獲・発見・痕跡など。空でも可）','')||'';
+  const pt={id:Date.now(),lat:lastPos[0],lng:lastPos[1],t:Date.now(),memo};
+  points.push(pt); save(); drawPoint(pt); renderLogs(); setStatus('地点を記録しました');
+}
+const pointLayer=L.layerGroup().addTo(map);
+function drawPoint(pt){
+  L.marker([pt.lat,pt.lng]).addTo(pointLayer)
+   .bindPopup(`${fmt(pt.t)}<br>${pt.memo||'(メモなし)'}`);
+}
+
+// ===== 保存・表示 =====
+function save(){ localStorage.setItem(TRACKS_KEY,JSON.stringify(tracks)); localStorage.setItem(POINTS_KEY,JSON.stringify(points)); }
+function renderLogs(){
+  const pl=document.getElementById('pointList');
+  pl.innerHTML = points.length? '' : '<div class="note">まだありません</div>';
+  [...points].reverse().forEach(pt=>{
+    const d=document.createElement('div'); d.className='row';
+    d.innerHTML=`<div><div>${pt.memo||'(メモなし)'}</div><div class="t">${fmt(pt.t)}・${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}</div></div>`;
+    const del=document.createElement('button'); del.className='del'; del.textContent='削除';
+    del.onclick=()=>{ points=points.filter(x=>x.id!==pt.id); save(); pointLayer.clearLayers(); points.forEach(drawPoint); renderLogs(); };
+    const go=document.createElement('button'); go.className='del'; go.style.background='#def'; go.style.color='#06c'; go.textContent='地図';
+    go.onclick=()=>{ map.setView([pt.lat,pt.lng],15); closeSheet(); };
+    d.appendChild(go); d.appendChild(del); pl.appendChild(d);
+  });
+  const tl=document.getElementById('trackList');
+  tl.innerHTML = tracks.length? '' : '<div class="note">まだありません</div>';
+  [...tracks].reverse().forEach(tr=>{
+    const km=trackLen(tr)/1000;
+    const d=document.createElement('div'); d.className='row';
+    d.innerHTML=`<div><div>${tr.name}</div><div class="t">${tr.pts.length}点・${km.toFixed(2)}km</div></div>`;
+    const del=document.createElement('button'); del.className='del'; del.textContent='削除';
+    del.onclick=()=>{ tracks=tracks.filter(x=>x.id!==tr.id); save(); renderLogs(); };
+    d.appendChild(del); tl.appendChild(d);
+  });
+}
+function trackLen(tr){ let s=0; for(let i=1;i<tr.pts.length;i++) s+=dist(tr.pts[i-1][0],tr.pts[i-1][1],tr.pts[i][0],tr.pts[i][1]); return s; }
+
+// ===== 書き出し =====
+function dl(name,text,type){ const b=new Blob([text],{type}); const a=document.createElement('a');
+  a.href=URL.createObjectURL(b); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+function exportPointsCSV(){
+  if(!points.length){alert('地点記録がありません');return;}
+  let c='日時,緯度,経度,メモ\n';
+  points.forEach(p=>{ c+=`${fmt(p.t)},${p.lat},${p.lng},"${(p.memo||'').replace(/"/g,'""')}"\n`; });
+  dl('points_'+ymd()+'.csv','﻿'+c,'text/csv');
+}
+function exportTracksCSV(){
+  if(!tracks.length){alert('軌跡記録がありません');return;}
+  let c='軌跡名,日時,緯度,経度\n';
+  tracks.forEach(tr=>tr.pts.forEach(p=>{ c+=`"${tr.name}",${fmt(p[2])},${p[0]},${p[1]}\n`; }));
+  dl('tracks_'+ymd()+'.csv','﻿'+c,'text/csv');
+}
+function exportTracksGPX(){
+  if(!tracks.length){alert('軌跡記録がありません');return;}
+  let g='<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="kinryoku-map" xmlns="http://www.topografix.com/GPX/1/1">\n';
+  points.forEach(p=>{ g+=`<wpt lat="${p.lat}" lon="${p.lng}"><time>${new Date(p.t).toISOString()}</time><name>${esc(p.memo||'point')}</name></wpt>\n`; });
+  tracks.forEach(tr=>{ g+=`<trk><name>${esc(tr.name)}</name><trkseg>\n`;
+    tr.pts.forEach(p=>{ g+=`<trkpt lat="${p[0]}" lon="${p[1]}"><time>${new Date(p[2]).toISOString()}</time></trkpt>\n`; });
+    g+='</trkseg></trk>\n'; });
+  g+='</gpx>'; dl('tracks_'+ymd()+'.gpx',g,'application/gpx+xml');
+}
+function esc(s){return (s||'').replace(/[<&>]/g,c=>({'<':'&lt;','&':'&amp;','>':'&gt;'}[c]));}
+
+// ===== UI =====
+function setStatus(t){ document.getElementById('status').innerHTML='<span class="pill">'+t+'</span>'; }
+function fmt(ms){ const d=new Date(ms); const z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}/${z(d.getMonth()+1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`; }
+function ymd(){ const d=new Date(),z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`; }
+function openSheet(){ renderLogs(); document.getElementById('sheet').classList.add('open'); }
+function closeSheet(){ document.getElementById('sheet').classList.remove('open'); }
+
+document.getElementById('btnLoc').onclick=()=>{ startWatch(); if(lastPos) map.setView(lastPos,15); };
+document.getElementById('btnTrack').onclick=toggleTrack;
+document.getElementById('btnPoint').onclick=addPoint;
+document.getElementById('btnLog').onclick=openSheet;
+document.getElementById('btnRefresh').onclick=()=>loadAll(true);
+document.getElementById('btnLayers').onclick=()=>{ const p=document.getElementById('layersPanel'); p.style.display=p.style.display==='block'?'none':'block'; };
+['ban','law','gate'].forEach(k=>{ document.getElementById('ly-'+k).onchange=e=>{
+  if(e.target.checked) layerGroups[k].addTo(map); else map.removeLayer(layerGroups[k]); }; });
+document.querySelectorAll('input[name=base]').forEach(r=>r.onchange=e=>{
+  map.removeLayer(curBase); curBase=bases[e.target.value]; curBase.addTo(map); });
+
+// 起動
+loadAll(false);
+renderLogs(); points.forEach(drawPoint);
+</script>
+</body>
+</html>
